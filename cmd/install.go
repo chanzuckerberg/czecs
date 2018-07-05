@@ -9,89 +9,108 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/aws/aws-sdk-go/service/ecs/ecsiface"
 	"github.com/chanzuckerberg/czecs/tasks"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
-var (
-	quiet    bool
+type installCmd struct {
+	templateCmd
 	rollback bool
 	service  string
-)
+}
 
-// installCmd represents the install command
-var installCmd = &cobra.Command{
-	Use:   "install",
-	Short: "Install a service into an ECS cluster",
-	Long: `This command installs a service into an ECS cluster.
+func newInstallCmd() *cobra.Command {
+	inst := &installCmd{}
+	cmd := &cobra.Command{
+		Use:   "install [cluster] [path containing czecs.json]",
+		Short: "Install a service into an ECS cluster",
+		Long: `This command installs a service into an ECS cluster.
 
 Limitations: No support for setting up load balancers through this command;
 if you need load balancers; manually create an ECS service outside this tool
 (e.g. using Terraform or aws command line tool), then use czecs upgrade.`,
-	Args: cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cluster := args[0]
-		czecsPath := args[1]
-		var balances map[string]interface{}
-		balances, err := mergeValues(balanceFiles, values, stringValues)
-		if err != nil {
-			return err
-		}
-		values := map[string]interface{}{
-			"Values": balances,
-		}
-		registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(path.Join(czecsPath, "czecs.json"), values, strict)
-		if err != nil {
-			return errors.Wrap(err, "cannot parse task definition")
-		}
+		SilenceUsage: true,
+		Args:         cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sess := session.Must(session.NewSessionWithOptions(session.Options{
+				SharedConfigState: session.SharedConfigEnable,
+			}))
+			svc := ecs.New(sess)
+			return inst.run(args, svc)
+		},
+	}
 
-		if debug {
-			fmt.Printf("%+v\n", registerTaskDefinitionInput)
-		}
-		sess := session.Must(session.NewSessionWithOptions(session.Options{
-			SharedConfigState: session.SharedConfigEnable,
-		}))
-		svc := ecs.New(sess)
-		describeServicesOutput, err := svc.DescribeServices(&ecs.DescribeServicesInput{
-			Cluster:  &cluster,
-			Services: []*string{&service},
-		})
-		if err != nil {
-			return errors.Wrap(err, "cannot describe services")
-		}
-		if len(describeServicesOutput.Failures) != 0 {
-			return fmt.Errorf("Error retrieving information about existing service %v: %v", service, describeServicesOutput.Failures)
-		}
-		var oldTaskDefinition *string
-		for _, existingService := range describeServicesOutput.Services {
-			if *existingService.ServiceName == service || *existingService.ServiceArn == service {
-				oldTaskDefinition = existingService.TaskDefinition
-			}
-		}
-		if oldTaskDefinition != nil {
-			return fmt.Errorf("Service %v already exists in cluster %v. Use czecs upgrade command to upgrade existing service", service, cluster)
-		}
-		registerTaskDefinitionOutput, err := svc.RegisterTaskDefinition(registerTaskDefinitionInput)
-		if err != nil {
-			return errors.Wrap(err, "cannot register task definition")
-		}
-		taskDefn := registerTaskDefinitionOutput.TaskDefinition
-		err = deployInstall(svc, cluster, service, *taskDefn.TaskDefinitionArn)
-		if err != nil && rollback {
-			err = rollbackInstall(svc, cluster, service)
-			if err != nil {
-				return errors.Wrap(err, "cannot rollback install")
-			}
-			svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
-				TaskDefinition: taskDefn.TaskDefinitionArn,
-			})
-		}
-		return nil
-	},
+	f := cmd.Flags()
+	f.BoolVar(&inst.strict, "strict", false, "fail on lint warnings")
+	f.StringSliceVarP(&inst.balanceFiles, "balances", "f", []string{}, "specify values in a JSON file or an S3 URL")
+	f.StringSliceVar(&inst.values, "set", []string{}, "set values on the command line (can repeat or use comma-separated values)")
+	f.StringSliceVar(&inst.stringValues, "set-string", []string{}, "set STRING values on the command line (can repeat or use comma-separated values)")
+	f.BoolVar(&inst.rollback, "rollback", false, "delete service if deployment failed")
+	f.StringVarP(&inst.service, "name", "n", "", "service name; required for now")
+	cmd.MarkFlagRequired("name")
+
+	return cmd
 }
 
-func deployInstall(svc *ecs.ECS, cluster string, service string, taskDefnArn string) error {
+func (i *installCmd) run(args []string, svc ecsiface.ECSAPI) error {
+	cluster := args[0]
+	czecsPath := args[1]
+	var balances map[string]interface{}
+	balances, err := mergeValues(i.balanceFiles, i.values, i.stringValues)
+	if err != nil {
+		return err
+	}
+	values := map[string]interface{}{
+		"Values": balances,
+	}
+	registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(path.Join(czecsPath, "czecs.json"), values, i.strict)
+	if err != nil {
+		return errors.Wrap(err, "cannot parse task definition")
+	}
+	if debug {
+		fmt.Printf("%+v\n", registerTaskDefinitionInput)
+	}
+
+	describeServicesOutput, err := svc.DescribeServices(&ecs.DescribeServicesInput{
+		Cluster:  &cluster,
+		Services: []*string{&i.service},
+	})
+	if err != nil {
+		return errors.Wrap(err, "cannot describe services")
+	}
+	if len(describeServicesOutput.Failures) != 0 {
+		return fmt.Errorf("Error retrieving information about existing service %v: %v", i.service, describeServicesOutput.Failures)
+	}
+	var oldTaskDefinition *string
+	for _, existingService := range describeServicesOutput.Services {
+		if *existingService.ServiceName == i.service || *existingService.ServiceArn == i.service {
+			oldTaskDefinition = existingService.TaskDefinition
+		}
+	}
+	if oldTaskDefinition != nil {
+		return fmt.Errorf("Service %v already exists in cluster %v. Use czecs upgrade command to upgrade existing service", i.service, cluster)
+	}
+	registerTaskDefinitionOutput, err := svc.RegisterTaskDefinition(registerTaskDefinitionInput)
+	if err != nil {
+		return errors.Wrap(err, "cannot register task definition")
+	}
+	taskDefn := registerTaskDefinitionOutput.TaskDefinition
+	err = deployInstall(svc, cluster, i.service, *taskDefn.TaskDefinitionArn)
+	if err != nil && i.rollback {
+		err = rollbackInstall(svc, cluster, i.service)
+		if err != nil {
+			return errors.Wrap(err, "cannot rollback install")
+		}
+		svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
+			TaskDefinition: taskDefn.TaskDefinitionArn,
+		})
+	}
+	return nil
+}
+
+func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefnArn string) error {
 	// Get the primary deployment's updated date, default to now if missing
 	createdAt := time.Now()
 	createServiceOutput, err := svc.CreateService(&ecs.CreateServiceInput{
@@ -122,7 +141,7 @@ func deployInstall(svc *ecs.ECS, cluster string, service string, taskDefnArn str
 		opts...)
 }
 
-func rollbackInstall(svc *ecs.ECS, cluster string, service string) error {
+func rollbackInstall(svc ecsiface.ECSAPI, cluster string, service string) error {
 	// Get the primary deployment's updated date, default to now if missing
 	deleteServiceOutput, err := svc.DeleteService(&ecs.DeleteServiceInput{
 		Cluster: &cluster,
@@ -145,15 +164,5 @@ func rollbackInstall(svc *ecs.ECS, cluster string, service string) error {
 }
 
 func init() {
-	rootCmd.AddCommand(installCmd)
-
-	f := installCmd.Flags()
-	f.BoolVar(&strict, "strict", false, "fail on lint warnings")
-	f.StringSliceVarP(&balanceFiles, "balances", "f", []string{}, "specify values in a JSON file or an S3 URL")
-	f.StringSliceVar(&values, "set", []string{}, "set values on the command line (can repeat or use comma-separated values)")
-	f.StringSliceVar(&stringValues, "set-string", []string{}, "set STRING values on the command line (can repeat or use comma-separated values)")
-	f.BoolVarP(&quiet, "quiet", "q", false, "do not output to console; use return code to determine success/failure")
-	f.BoolVar(&rollback, "rollback", false, "delete service if deployment failed")
-	f.StringVarP(&service, "name", "n", "", "service name; required for now")
-	installCmd.MarkFlagRequired("name")
+	rootCmd.AddCommand(newInstallCmd())
 }
