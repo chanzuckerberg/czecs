@@ -26,6 +26,7 @@ var templateCmd = &cobra.Command{
 from any command line arguments or passed in via --balances. For example:
 
 czecs template --set foo=bar --set baz=qux,spam=ham --balances balances.json`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		czecsPath := args[0]
 		var balances map[string]interface{}

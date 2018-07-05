@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/chanzuckerberg/czecs/tasks"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +29,7 @@ var installCmd = &cobra.Command{
 Limitations: No support for setting up load balancers through this command;
 if you need load balancers; manually create an ECS service outside this tool
 (e.g. using Terraform or aws command line tool), then use czecs upgrade.`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cluster := args[0]
 		czecsPath := args[1]
@@ -41,21 +43,22 @@ if you need load balancers; manually create an ECS service outside this tool
 		}
 		registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(path.Join(czecsPath, "czecs.json"), values, strict)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "cannot parse task definition")
 		}
 
-		fmt.Printf("%+v\n", registerTaskDefinitionInput)
-		sess, err := session.NewSession(&aws.Config{})
-		if err != nil {
-			return err
+		if debug {
+			fmt.Printf("%+v\n", registerTaskDefinitionInput)
 		}
+		sess := session.Must(session.NewSessionWithOptions(session.Options{
+			SharedConfigState: session.SharedConfigEnable,
+		}))
 		svc := ecs.New(sess)
 		describeServicesOutput, err := svc.DescribeServices(&ecs.DescribeServicesInput{
 			Cluster:  &cluster,
 			Services: []*string{&service},
 		})
 		if err != nil {
-			return err
+			return errors.Wrap(err, "cannot describe services")
 		}
 		if len(describeServicesOutput.Failures) != 0 {
 			return fmt.Errorf("Error retrieving information about existing service %v: %v", service, describeServicesOutput.Failures)
@@ -71,14 +74,14 @@ if you need load balancers; manually create an ECS service outside this tool
 		}
 		registerTaskDefinitionOutput, err := svc.RegisterTaskDefinition(registerTaskDefinitionInput)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "cannot register task definition")
 		}
 		taskDefn := registerTaskDefinitionOutput.TaskDefinition
 		err = deployInstall(svc, cluster, service, *taskDefn.TaskDefinitionArn)
 		if err != nil && rollback {
 			err = rollbackInstall(svc, cluster, service)
 			if err != nil {
-				return err
+				return errors.Wrap(err, "cannot rollback install")
 			}
 			svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
 				TaskDefinition: taskDefn.TaskDefinitionArn,

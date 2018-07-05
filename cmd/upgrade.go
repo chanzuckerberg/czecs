@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/chanzuckerberg/czecs/tasks"
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +23,7 @@ var upgradeCmd = &cobra.Command{
 	Long: `This command upgrades a service to a new version of a task definition.
 
 	The task must already exist.`,
+	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cluster := args[0]
 		service = args[1]
@@ -36,21 +38,22 @@ var upgradeCmd = &cobra.Command{
 		}
 		registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(path.Join(czecsPath, "czecs.json"), values, strict)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "cannot parse task definition")
 		}
 
-		fmt.Printf("%+v\n", registerTaskDefinitionInput)
-		sess, err := session.NewSession(&aws.Config{})
-		if err != nil {
-			return err
+		if debug {
+			fmt.Printf("%+v\n", registerTaskDefinitionInput)
 		}
+		sess := session.Must(session.NewSessionWithOptions(session.Options{
+			SharedConfigState: session.SharedConfigEnable,
+		}))
 		svc := ecs.New(sess)
 		describeServicesOutput, err := svc.DescribeServices(&ecs.DescribeServicesInput{
 			Cluster:  &cluster,
 			Services: []*string{&service},
 		})
 		if err != nil {
-			return err
+			return errors.Wrap(err, "cannot describe services")
 		}
 		if len(describeServicesOutput.Failures) != 0 {
 			for _, failure := range describeServicesOutput.Failures {
@@ -71,7 +74,7 @@ var upgradeCmd = &cobra.Command{
 		}
 		registerTaskDefinitionOutput, err := svc.RegisterTaskDefinition(registerTaskDefinitionInput)
 		if err != nil {
-			return err
+			return errors.Wrap(err, "cannot register task definition")
 		}
 		taskDefn := registerTaskDefinitionOutput.TaskDefinition
 		err = deployUpgrade(svc, cluster, service, *taskDefn.TaskDefinitionArn)
@@ -84,7 +87,7 @@ var upgradeCmd = &cobra.Command{
 		} else if rollback {
 			err = deployUpgrade(svc, cluster, service, *oldTaskDefinition)
 			if err != nil {
-				return err
+				return errors.Wrap(err, "cannot rollback")
 			}
 			svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
 				TaskDefinition: taskDefn.TaskDefinitionArn,
