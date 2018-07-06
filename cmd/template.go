@@ -28,7 +28,8 @@ func newTemplateCmd() *cobra.Command {
 from any command line arguments or passed in via --balances. For example:
 
 czecs template --set foo=bar --set baz=qux,spam=ham --balances balances.json`,
-		Args: cobra.ExactArgs(1),
+		SilenceUsage: true,
+		Args:         cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return template.run(args)
 		},

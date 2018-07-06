@@ -12,6 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ecs/ecsiface"
 	"github.com/chanzuckerberg/czecs/tasks"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -34,6 +35,14 @@ if you need load balancers; manually create an ECS service outside this tool
 		SilenceUsage: true,
 		Args:         cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			logLevel := log.InfoLevel
+			if debug { // debug overrides quiet
+				logLevel = log.DebugLevel
+			} else if quiet {
+				logLevel = log.FatalLevel
+			}
+			log.SetLevel(logLevel)
+
 			sess := session.Must(session.NewSessionWithOptions(session.Options{
 				SharedConfigState: session.SharedConfigEnable,
 			}))
@@ -65,13 +74,13 @@ func (i *installCmd) run(args []string, svc ecsiface.ECSAPI) error {
 	values := map[string]interface{}{
 		"Values": balances,
 	}
+	log.Debugf("Values used for template: %#v", values)
+
 	registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(path.Join(czecsPath, "czecs.json"), values, i.strict)
 	if err != nil {
 		return errors.Wrap(err, "cannot parse task definition")
 	}
-	if debug {
-		fmt.Printf("%+v\n", registerTaskDefinitionInput)
-	}
+	log.Debugf("Task definition: %+v", registerTaskDefinitionInput)
 
 	describeServicesOutput, err := svc.DescribeServices(&ecs.DescribeServicesInput{
 		Cluster:  &cluster,
@@ -81,7 +90,7 @@ func (i *installCmd) run(args []string, svc ecsiface.ECSAPI) error {
 		return errors.Wrap(err, "cannot describe services")
 	}
 	if len(describeServicesOutput.Failures) != 0 {
-		return fmt.Errorf("Error retrieving information about existing service %v: %v", i.service, describeServicesOutput.Failures)
+		return fmt.Errorf("Error retrieving information about existing service %#v: %#v", i.service, describeServicesOutput.Failures)
 	}
 	var oldTaskDefinition *string
 	for _, existingService := range describeServicesOutput.Services {
@@ -90,27 +99,38 @@ func (i *installCmd) run(args []string, svc ecsiface.ECSAPI) error {
 		}
 	}
 	if oldTaskDefinition != nil {
-		return fmt.Errorf("Service %v already exists in cluster %v. Use czecs upgrade command to upgrade existing service", i.service, cluster)
+		return fmt.Errorf("Service %#v already exists in cluster %#v. Use czecs upgrade command to upgrade existing service", i.service, cluster)
 	}
+
 	registerTaskDefinitionOutput, err := svc.RegisterTaskDefinition(registerTaskDefinitionInput)
 	if err != nil {
 		return errors.Wrap(err, "cannot register task definition")
 	}
 	taskDefn := registerTaskDefinitionOutput.TaskDefinition
+	log.Infof("Successfully registered task definition %#v", *taskDefn.TaskDefinitionArn)
+
 	err = deployInstall(svc, cluster, i.service, *taskDefn.TaskDefinitionArn)
 	if err != nil && i.rollback {
-		err = rollbackInstall(svc, cluster, i.service)
-		if err != nil {
-			return errors.Wrap(err, "cannot rollback install")
+		log.Warnf("Rolling back service creation of %#v by deleting it", i.service)
+		rollbackErr := rollbackInstall(svc, cluster, i.service)
+		if rollbackErr != nil {
+			return errors.Wrap(rollbackErr, "cannot rollback install")
 		}
 		svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
 			TaskDefinition: taskDefn.TaskDefinitionArn,
 		})
+		log.Debugf("Deregistering new task definition %#v", *taskDefn.TaskDefinitionArn)
+		return err
 	}
 	return nil
 }
 
 func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefnArn string) error {
+	// Intentionally using printf directly, since we want this to be on the same line as the
+	// progress dots.
+	if log.GetLevel() >= log.InfoLevel {
+		fmt.Printf("Creating service %#v in cluster %#v with task definition %#v", service, cluster, taskDefnArn)
+	}
 	// Get the primary deployment's updated date, default to now if missing
 	createdAt := time.Now()
 	createServiceOutput, err := svc.CreateService(&ecs.CreateServiceInput{
@@ -130,7 +150,7 @@ func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefn
 	}
 
 	opts := []request.WaiterOption{getFailOnAbortContext(createdAt)}
-	if !quiet {
+	if log.GetLevel() >= log.InfoLevel {
 		opts = append(opts, sleepProgressWithContext)
 	}
 	return svc.WaitUntilServicesStableWithContext(
@@ -152,8 +172,10 @@ func rollbackInstall(svc ecsiface.ECSAPI, cluster string, service string) error 
 	}
 
 	opts := []request.WaiterOption{}
-	if !quiet {
+	if log.GetLevel() == log.InfoLevel {
 		opts = append(opts, sleepProgressWithContext)
+	} else if log.GetLevel() == log.DebugLevel {
+		opts = append(opts, debugSleepProgressWithContext)
 	}
 	return svc.WaitUntilServicesInactiveWithContext(
 		aws.BackgroundContext(),
