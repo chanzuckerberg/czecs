@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path"
 
 	"github.com/chanzuckerberg/czecs/tasks"
 	"github.com/imdario/mergo"
@@ -16,20 +15,19 @@ type templateCmd struct {
 	values       []string
 	stringValues []string
 	strict       bool
-	templates    []string
 }
 
 func newTemplateCmd() *cobra.Command {
 	template := &templateCmd{}
 	var cmd = &cobra.Command{
-		Use:   "template",
+		Use:   "template [task_definition.json] [task_definition2.json...]",
 		Short: "Renders the czecs container definition template",
 		Long: `Renders the czecs container definition template, substituting values
 from any command line arguments or passed in via --balances. For example:
 
-czecs template --set foo=bar --set baz=qux,spam=ham --balances balances.json`,
+czecs template --set foo=bar --set baz=qux,spam=ham --balances balances.json czecs.json`,
 		SilenceUsage: true,
-		Args:         cobra.ExactArgs(1),
+		Args:         cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return template.run(args)
 		},
@@ -40,13 +38,11 @@ czecs template --set foo=bar --set baz=qux,spam=ham --balances balances.json`,
 	f.StringSliceVarP(&template.balanceFiles, "balances", "f", []string{}, "specify values in a JSON file or an S3 URL")
 	f.StringSliceVar(&template.values, "set", []string{}, "set values on the command line (can repeat or use comma-separated values)")
 	f.StringSliceVar(&template.stringValues, "set-string", []string{}, "set STRING values on the command line (can repeat or use comma-separated values)")
-	f.StringSliceVarP(&template.templates, "execute", "x", []string{"czecs.json"}, "only execute the given templates")
 
 	return cmd
 }
 
 func (t *templateCmd) run(args []string) error {
-	czecsPath := args[0]
 	var balances map[string]interface{}
 	balances, err := mergeValues(t.balanceFiles, t.values, t.stringValues)
 	if err != nil {
@@ -55,8 +51,8 @@ func (t *templateCmd) run(args []string) error {
 	values := map[string]interface{}{
 		"Values": balances,
 	}
-	for _, templateName := range t.templates {
-		taskDefn, err := tasks.ParseTaskDefinition(path.Join(czecsPath, templateName), values, t.strict)
+	for _, taskDefnJSON := range args {
+		taskDefn, err := tasks.ParseTaskDefinition(taskDefnJSON, values, t.strict)
 		if err != nil {
 			return err
 		}

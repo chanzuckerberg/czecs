@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -25,7 +24,7 @@ type installCmd struct {
 func newInstallCmd() *cobra.Command {
 	inst := &installCmd{}
 	cmd := &cobra.Command{
-		Use:   "install [cluster] [path containing czecs.json]",
+		Use:   "install [cluster] [task_definition.json]",
 		Short: "Install a service into an ECS cluster",
 		Long: `This command installs a service into an ECS cluster.
 
@@ -65,7 +64,7 @@ if you need load balancers; manually create an ECS service outside this tool
 
 func (i *installCmd) run(args []string, svc ecsiface.ECSAPI) error {
 	cluster := args[0]
-	czecsPath := args[1]
+	taskDefnJSON := args[1]
 	var balances map[string]interface{}
 	balances, err := mergeValues(i.balanceFiles, i.values, i.stringValues)
 	if err != nil {
@@ -76,7 +75,7 @@ func (i *installCmd) run(args []string, svc ecsiface.ECSAPI) error {
 	}
 	log.Debugf("Values used for template: %#v", values)
 
-	registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(path.Join(czecsPath, "czecs.json"), values, i.strict)
+	registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(taskDefnJSON, values, i.strict)
 	if err != nil {
 		return errors.Wrap(err, "cannot parse task definition")
 	}

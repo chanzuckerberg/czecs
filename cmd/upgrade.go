@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -24,7 +23,7 @@ type upgradeCmd struct {
 func newUpgradeCmd() *cobra.Command {
 	upgrade := &upgradeCmd{}
 	cmd := &cobra.Command{
-		Use:   "upgrade [cluster] [service] [path containing czecs.json]",
+		Use:   "upgrade [cluster] [service] [task_definition.json]",
 		Short: "Upgrade an existing service in an ECS cluster",
 		Long: `This command upgrades a service to a new version of a task definition.
 
@@ -62,7 +61,7 @@ The task must already exist.`,
 func (u *upgradeCmd) run(args []string, svc ecsiface.ECSAPI) error {
 	cluster := args[0]
 	service := args[1]
-	czecsPath := args[2]
+	taskDefnJSON := args[2]
 	var balances map[string]interface{}
 	balances, err := mergeValues(u.balanceFiles, u.values, u.stringValues)
 	if err != nil {
@@ -73,7 +72,7 @@ func (u *upgradeCmd) run(args []string, svc ecsiface.ECSAPI) error {
 	}
 	log.Debugf("Values used for template: %#v", values)
 
-	registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(path.Join(czecsPath, "czecs.json"), values, u.strict)
+	registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(taskDefnJSON, values, u.strict)
 	if err != nil {
 		return errors.Wrap(err, "cannot parse task definition")
 	}
