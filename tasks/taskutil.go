@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/pkg/errors"
 )
 
 // ReadFileOrURI reads a file either from local disk or from the given URI.
@@ -27,25 +28,25 @@ func ReadFileOrURI(fileOrURI string) ([]byte, error) {
 	case "s3":
 		sess, err := session.NewSession(&aws.Config{})
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "Could not create session")
 		}
 		svc := s3.New(sess)
 		result, err := svc.GetObject(&s3.GetObjectInput{
 			Bucket: &url.Host, Key: &url.Path})
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "Could not retrieve S3 object %v", fileOrURI)
 		}
 		defer result.Body.Close()
 		return ioutil.ReadAll(result.Body)
 	case "http", "https":
 		resp, err := http.Get(fileOrURI)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "Could not retrieve %v", fileOrURI)
 		}
 		defer resp.Body.Close()
 		return ioutil.ReadAll(resp.Body)
 	}
-	return nil, fmt.Errorf("Unexpected url scheme %v in URI %s", url.Scheme, fileOrURI)
+	return nil, fmt.Errorf("Unexpected url scheme %v in URI %v", url.Scheme, fileOrURI)
 }
 
 // ParseTaskDefinition parses an ECS task definition from a file, using the given values to fill in template variables.
@@ -54,7 +55,7 @@ func ReadFileOrURI(fileOrURI string) ([]byte, error) {
 func ParseTaskDefinition(defnFilename string, values map[string]interface{}, strict bool) (*ecs.RegisterTaskDefinitionInput, error) {
 	rawDefn, err := ReadFileOrURI(defnFilename)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "Error reading task definition from %v", defnFilename)
 	}
 	templateOption := "missingkey=zero"
 	if strict {
@@ -64,11 +65,11 @@ func ParseTaskDefinition(defnFilename string, values map[string]interface{}, str
 	}
 	tmpl, err := template.New(defnFilename).Option(templateOption).Parse(string(rawDefn))
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Error parsing task definition template")
 	}
 	var defn bytes.Buffer
 	if tmpl.Execute(&defn, values); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Error executing task definition template")
 	}
 	// missingkey=zero doesn't work completely properly on map[string]interface{}
 	// https://github.com/golang/go/issues/24963
@@ -76,7 +77,7 @@ func ParseTaskDefinition(defnFilename string, values map[string]interface{}, str
 	filteredDefn := strings.Replace(defn.String(), "<no value>", "", -1)
 	var taskDefn ecs.RegisterTaskDefinitionInput
 	if err = json.Unmarshal([]byte(filteredDefn), &taskDefn); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Error parsing JSON of task definition")
 	}
 	return &taskDefn, nil
 }
@@ -85,11 +86,11 @@ func ParseTaskDefinition(defnFilename string, values map[string]interface{}, str
 func ParseBalances(balancesFilename string) (map[string]interface{}, error) {
 	rawBalances, err := ReadFileOrURI(balancesFilename)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "Error reading balances file %v", defnFilename)
 	}
 	var balances map[string]interface{}
 	if err = json.Unmarshal(rawBalances, &balances); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "Error parsing JSON of balances file")
 	}
 	return balances, nil
 }
