@@ -86,7 +86,7 @@ func ParseTaskDefinition(defnFilename string, values map[string]interface{}, str
 func ParseBalances(balancesFilename string) (map[string]interface{}, error) {
 	rawBalances, err := ReadFileOrURI(balancesFilename)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Error reading balances file %v", defnFilename)
+		return nil, errors.Wrapf(err, "Error reading balances file %v", balancesFilename)
 	}
 	var balances map[string]interface{}
 	if err = json.Unmarshal(rawBalances, &balances); err != nil {
