@@ -16,11 +16,13 @@ archive:
     format: zip
 
 changelog:
-  sort: asc
   filters:
     exclude:
     - '^docs:'
     - '^test:'
+    - '^Initial commit$'
+    - '^Merge pull request #.* from'
+    - typo
 
 brew:
   description: "ECS release management tool."
