@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/chanzuckerberg/czecs/version"
+	"github.com/chanzuckerberg/czecs/util"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +28,7 @@ func newVersionCmd() *cobra.Command {
 }
 
 func (v *versionCmd) run() error {
-	ver, err := version.VersionString()
+	ver, err := util.VersionString()
 	if err != nil {
 		return err
 	}
