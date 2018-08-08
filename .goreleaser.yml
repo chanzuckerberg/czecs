@@ -8,7 +8,7 @@ builds:
   goarch:
     - amd64
   ldflags:
-    - "-w -s -X github.com/chanzuckerberg/czecs/version.GitSha={{.Commit}} -X github.com/chanzuckerberg/czecs/version.Version={{.Version}} -X github.com/chanzuckerberg/czecs/version.Dirty=false -X github.com/chanzuckerberg/czecs/version.Release=true"
+    - "-w -s -X github.com/chanzuckerberg/czecs/util.GitSha={{.Commit}} -X github.com/chanzuckerberg/czecs/util.Version={{.Version}} -X github.com/chanzuckerberg/czecs/util.Dirty=false -X github.com/chanzuckerberg/czecs/util.Release=true"
 
 archive:
   format_overrides:
