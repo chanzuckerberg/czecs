@@ -112,25 +112,35 @@ func (u *upgradeCmd) run(args []string, svc ecsiface.ECSAPI) error {
 	log.Infof("Successfully registered task definition %#v", *taskDefn.TaskDefinitionArn)
 
 	err = deployUpgrade(svc, cluster, service, *taskDefn.TaskDefinitionArn)
-	if err == nil {
-		log.Debugf("Deregistering old task definition %#v", *oldTaskDefinition)
-		if u.deregister && oldTaskDefinition != nil {
-			svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
-				TaskDefinition: oldTaskDefinition,
+	if err != nil {
+		if u.rollback {
+			log.Warnf("Rolling back service %#v to old task definition %#v", service, oldTaskDefinition)
+			rollbackErr := deployUpgrade(svc, cluster, service, *oldTaskDefinition)
+			if rollbackErr != nil {
+				// TODO(mbarrien): Report original
+				return errors.Wrap(rollbackErr, "cannot rollback")
+			}
+			log.Debugf("Deregistering new task definition %#v", *taskDefn.TaskDefinitionArn)
+			_, deregisterErr := svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
+				TaskDefinition: taskDefn.TaskDefinitionArn,
 			})
+			if deregisterErr != nil {
+				log.Warnf("Error deregistering task definition after rollback: %#v", err.Error())
+				// Intentionally swallow error; let the original error bubble up
+			}
 		}
-	} else if u.rollback {
-		log.Warnf("Rolling back service %#v to old task definition %#v", service, oldTaskDefinition)
-		rollbackErr := deployUpgrade(svc, cluster, service, *oldTaskDefinition)
-		if rollbackErr != nil {
-			// TODO(mbarrien): Report original
-			return errors.Wrap(rollbackErr, "cannot rollback")
-		}
-		log.Debugf("Deregistering new task definition %#v", *taskDefn.TaskDefinitionArn)
-		svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
-			TaskDefinition: taskDefn.TaskDefinitionArn,
-		})
 		return err
+	}
+
+	log.Debugf("Deregistering old task definition %#v", *oldTaskDefinition)
+	if u.deregister && oldTaskDefinition != nil {
+		_, err := svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
+			TaskDefinition: oldTaskDefinition,
+		})
+		if err != nil {
+			log.Warnf("Error deregistering task definition: %#v", err.Error())
+			// Intentionally swallow error; this isn't fatal
+		}
 	}
 	return nil
 }
