@@ -1,0 +1,38 @@
+{
+  "Family": "{{ .Values.project }}-{{ .Values.env }}-{{ .Values.name }}",
+  "ContainerDefinitions": [
+    {
+      "name": "{{ .Values.project }}-{{ .Values.env }}-{{ .Values.name }}",
+      "image": "library/hello-world:{{ .Values.tag }}",
+      "cpu": 256,
+      "entrypoint": [
+        "chamber",
+        "exec",
+        "{{ .Values.project }}-{{ .Values.env }}-{{ .Values.name }}",
+        "--"
+      ],
+      "command": [
+        "/bin/sh",
+        "-c",
+        "echo 'Hello world'"
+      ],
+      "memoryReservation": 512,
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 0
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "{{ .Values.logs_group }}",
+          "awslogs-region": "{{ .Values.region }}",
+          "awslogs-stream-prefix": "{{ .Values.project }}-{{ .Values.env }}-{{ .Values.name }}"
+        }
+      }
+    }
+  ],
+  "TaskRoleArn": "{{ .Values.task_role_arn }}"
+}

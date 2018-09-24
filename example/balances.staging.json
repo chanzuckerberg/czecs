@@ -1,0 +1,8 @@
+{
+    "project": "example",
+    "env": "staging",
+    "name": "helloworld",
+    "tag": "master",
+    "task_role_arn": "arn:aws:iam::123456789012:role/example-staging-helloworld",
+    "logs_group": "example-staging-logs-group"
+}

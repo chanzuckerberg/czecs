@@ -1,0 +1,8 @@
+{
+    "project": "example",
+    "env": "prod",
+    "name": "helloworld",
+    "tag": "production",
+    "task_role_arn": "arn:aws:iam::123456789012:role/example-prod-helloworld",
+    "logs_group": "example-prod-logs-group"
+}

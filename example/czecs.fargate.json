@@ -1,0 +1,47 @@
+{
+  "Family": "{{ .Values.project }}-{{ .Values.env }}-{{ .Values.name }}",
+  "Cpu": "256",
+  "Memory": "512",
+  "ContainerDefinitions": [
+    {
+      "name": "{{ .Values.project }}-{{ .Values.env }}-{{ .Values.name }}",
+      "image": "library/hello-world:{{ .Values.tag }}",
+      "entrypoint": [
+        "chamber",
+        "exec",
+        "{{ .Values.project }}-{{ .Values.env }}-{{ .Values.name }}",
+        "--"
+      ],
+      "repositoryCredentials": {
+        "credentialsParameter": "{{ .Values.repo_credentials }}"
+      },
+      "command": [
+        "/bin/sh",
+        "-c",
+        "echo 'Hello world'"
+      ],
+      "memoryReservation": 512,
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "{{ .Values.logs_group }}",
+          "awslogs-region": "{{ .Values.region }}",
+          "awslogs-stream-prefix": "{{ .Values.project }}-{{ .Values.env }}-{{ .Values.name }}"
+        }
+      }
+    }
+  ],
+  "ExecutionRoleArn": "{{ .Values.execution_role_arn }}",
+  "TaskRoleArn": "{{ .Values.task_role_arn }}",
+  "RequiresCompatibilities": [
+    "FARGATE"
+  ],
+  "NetworkMode": "awsvpc"
+}

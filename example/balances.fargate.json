@@ -1,0 +1,10 @@
+{
+    "project": "example",
+    "env": "staging",
+    "name": "helloworld",
+    "tag": "master",
+    "repo_credentials": "arn:aws:secretsmanager:us-west-2:123456789012:secret:example-staging-credentials/privatedocker-abcdef",
+    "task_role_arn": "arn:aws:iam::123456789012:role/example-staging-helloworld",
+    "execution_role_arn": "arn:aws:iam::123456789012:role/example-staging-helloworld-execution",
+    "logs_group": "example-staging-logs-group"
+}
