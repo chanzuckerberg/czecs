@@ -42,8 +42,10 @@ The task must already exist.`,
 			sess := session.Must(session.NewSessionWithOptions(session.Options{
 				SharedConfigState: session.SharedConfigEnable,
 			}))
+			config := sess.Config
+
 			svc := ecs.New(sess)
-			return upgrade.run(args, svc)
+			return upgrade.run(args, svc, config)
 		},
 	}
 
@@ -58,7 +60,7 @@ The task must already exist.`,
 	return cmd
 }
 
-func (u *upgradeCmd) run(args []string, svc ecsiface.ECSAPI) error {
+func (u *upgradeCmd) run(args []string, svc ecsiface.ECSAPI, config *aws.Config) error {
 	cluster := args[0]
 	service := args[1]
 	taskDefnJSON := args[2]
@@ -108,49 +110,53 @@ func (u *upgradeCmd) run(args []string, svc ecsiface.ECSAPI) error {
 	if err != nil {
 		return errors.Wrap(err, "cannot register task definition")
 	}
-	taskDefn := registerTaskDefinitionOutput.TaskDefinition
-	log.Infof("Successfully registered task definition %#v", *taskDefn.TaskDefinitionArn)
+	taskDefnArn := *registerTaskDefinitionOutput.TaskDefinition.TaskDefinitionArn
+	log.Infof("Successfully registered task definition %#v", taskDefnArn)
 
-	err = deployUpgrade(svc, cluster, service, *taskDefn.TaskDefinitionArn)
+	err = deployUpgrade(svc, cluster, service, taskDefnArn, config)
 	if err != nil {
 		if u.rollback {
 			log.Warnf("Rolling back service %#v to old task definition %#v", service, oldTaskDefinition)
-			rollbackErr := deployUpgrade(svc, cluster, service, *oldTaskDefinition)
+			rollbackErr := deployUpgrade(svc, cluster, service, *oldTaskDefinition, config)
 			if rollbackErr != nil {
 				// TODO(mbarrien): Report original
 				return errors.Wrap(rollbackErr, "cannot rollback")
 			}
-			log.Debugf("Deregistering new task definition %#v", *taskDefn.TaskDefinitionArn)
+			log.Debugf("Deregistering new task definition %#v", taskDefnArn)
 			_, deregisterErr := svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
-				TaskDefinition: taskDefn.TaskDefinitionArn,
+				TaskDefinition: &taskDefnArn,
 			})
 			if deregisterErr != nil {
 				log.Warnf("Error deregistering task definition after rollback: %#v", err.Error())
+				log.Warnf("You will have to manually deregister the new task. Using AWS CLI you can run 'aws ecs deregister-task-definition --task-definition %s'", taskDefnArn)
 				// Intentionally swallow error; let the original error bubble up
 			}
 		}
 		return err
 	}
 
-	log.Debugf("Deregistering old task definition %#v", *oldTaskDefinition)
 	if u.deregister && oldTaskDefinition != nil {
+		log.Debugf("Deregistering old task definition %#v", *oldTaskDefinition)
 		_, err := svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
 			TaskDefinition: oldTaskDefinition,
 		})
 		if err != nil {
 			log.Warnf("Error deregistering task definition: %#v", err.Error())
+			log.Warnf("You will have to manually deregister the old task. Using AWS CLI you can run 'aws ecs deregister-task-definition --task-definition %s'", *oldTaskDefinition)
 			// Intentionally swallow error; this isn't fatal
 		}
 	}
 	return nil
 }
 
-func deployUpgrade(svc ecsiface.ECSAPI, cluster string, service string, taskDefnArn string) error {
+func deployUpgrade(svc ecsiface.ECSAPI, cluster string, service string, taskDefnArn string, config *aws.Config) error {
 	// Intentionally using printf directly, since we want this to be on the same line as the
 	// progress dots.
 	if log.GetLevel() >= log.InfoLevel {
 		fmt.Printf("Updating service %#v in cluster %#v to task definition %#v", service, cluster, taskDefnArn)
 	}
+	log.Infof("Service info location: https://%s.console.aws.amazon.com/ecs/home?region=%s#/clusters/%s/services/%s/details", *config.Region, *config.Region, cluster, service)
+
 	// Get the primary deployment's updated date, default to now if missing
 	updatedAt := time.Now()
 	updateServiceOutput, err := svc.UpdateService(&ecs.UpdateServiceInput{

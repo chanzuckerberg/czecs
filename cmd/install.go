@@ -45,8 +45,10 @@ if you need load balancers; manually create an ECS service outside this tool
 			sess := session.Must(session.NewSessionWithOptions(session.Options{
 				SharedConfigState: session.SharedConfigEnable,
 			}))
+			config := sess.Config
+
 			svc := ecs.New(sess)
-			return inst.run(args, svc)
+			return inst.run(args, svc, config)
 		},
 	}
 
@@ -62,7 +64,7 @@ if you need load balancers; manually create an ECS service outside this tool
 	return cmd
 }
 
-func (i *installCmd) run(args []string, svc ecsiface.ECSAPI) error {
+func (i *installCmd) run(args []string, svc ecsiface.ECSAPI, config *aws.Config) error {
 	cluster := args[0]
 	taskDefnJSON := args[1]
 	var balances map[string]interface{}
@@ -105,31 +107,38 @@ func (i *installCmd) run(args []string, svc ecsiface.ECSAPI) error {
 	if err != nil {
 		return errors.Wrap(err, "cannot register task definition")
 	}
-	taskDefn := registerTaskDefinitionOutput.TaskDefinition
-	log.Infof("Successfully registered task definition %#v", *taskDefn.TaskDefinitionArn)
+	taskDefnArn := *registerTaskDefinitionOutput.TaskDefinition.TaskDefinitionArn
+	log.Infof("Successfully registered task definition %#v", taskDefnArn)
 
-	err = deployInstall(svc, cluster, i.service, *taskDefn.TaskDefinitionArn)
+	err = deployInstall(svc, cluster, i.service, taskDefnArn, config)
 	if err != nil && i.rollback {
 		log.Warnf("Rolling back service creation of %#v by deleting it", i.service)
 		rollbackErr := rollbackInstall(svc, cluster, i.service)
 		if rollbackErr != nil {
 			return errors.Wrap(rollbackErr, "cannot rollback install")
 		}
-		svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
-			TaskDefinition: taskDefn.TaskDefinitionArn,
+		log.Debugf("Deregistering new task definition %#v", taskDefnArn)
+		_, rollbackErr = svc.DeregisterTaskDefinition(&ecs.DeregisterTaskDefinitionInput{
+			TaskDefinition: &taskDefnArn,
 		})
-		log.Debugf("Deregistering new task definition %#v", *taskDefn.TaskDefinitionArn)
+		if rollbackErr != nil {
+			log.Warnf("Error deregistering task definition: %#v", rollbackErr.Error())
+			log.Warnf("You will have to manually deregister the new task. Using AWS CLI you can run 'aws ecs deregister-task-definition --task-definition %s'", taskDefnArn)
+			// Intentionally swallow error; this isn't fatal
+		}
 		return err
 	}
 	return nil
 }
 
-func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefnArn string) error {
+func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefnArn string, config *aws.Config) error {
 	// Intentionally using printf directly, since we want this to be on the same line as the
 	// progress dots.
 	if log.GetLevel() >= log.InfoLevel {
 		fmt.Printf("Creating service %#v in cluster %#v with task definition %#v", service, cluster, taskDefnArn)
 	}
+	log.Infof("Service info location: https://%s.console.aws.amazon.com/ecs/home?region=%s#/clusters/%s/services/%s/details", *config.Region, *config.Region, cluster, service)
+
 	// Get the primary deployment's updated date, default to now if missing
 	createdAt := time.Now()
 	createServiceOutput, err := svc.CreateService(&ecs.CreateServiceInput{
@@ -151,6 +160,8 @@ func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefn
 	opts := []request.WaiterOption{getFailOnAbortContext(createdAt)}
 	if log.GetLevel() >= log.InfoLevel {
 		opts = append(opts, sleepProgressWithContext)
+	} else if log.GetLevel() == log.DebugLevel {
+		opts = append(opts, debugSleepProgressWithContext)
 	}
 	return svc.WaitUntilServicesStableWithContext(
 		aws.BackgroundContext(),
