@@ -9,22 +9,22 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/ecs/ecsiface"
-	"github.com/chanzuckerberg/czecs/tasks"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 type installCmd struct {
-	templateCmd
-	rollback bool
-	service  string
+	registerCmd
+	rollback          bool
+	service           string
+	taskDefinitionArn string
 }
 
 func newInstallCmd() *cobra.Command {
 	inst := &installCmd{}
 	cmd := &cobra.Command{
-		Use:   "install [cluster] [task_definition.json]",
+		Use:   "install [--task-definition-arn arn] [cluster] [task_definition.json]",
 		Short: "Install a service into an ECS cluster",
 		Long: `This command installs a service into an ECS cluster.
 
@@ -32,7 +32,7 @@ Limitations: No support for setting up load balancers through this command;
 if you need load balancers; manually create an ECS service outside this tool
 (e.g. using Terraform or aws command line tool), then use czecs upgrade.`,
 		SilenceUsage: true,
-		Args:         cobra.ExactArgs(2),
+		Args:         cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			logLevel := log.InfoLevel
 			if debug { // debug overrides quiet
@@ -41,6 +41,10 @@ if you need load balancers; manually create an ECS service outside this tool
 				logLevel = log.FatalLevel
 			}
 			log.SetLevel(logLevel)
+
+			if (len(args) >= 2) == (inst.taskDefinitionArn != "") {
+				return fmt.Errorf("exactly one of a task definition JSON filename (czecs.json) or a task definition ARN via --task-definition-arn must be provided")
+			}
 
 			sess := session.Must(session.NewSessionWithOptions(session.Options{
 				SharedConfigState: session.SharedConfigEnable,
@@ -58,6 +62,7 @@ if you need load balancers; manually create an ECS service outside this tool
 	f.StringSliceVar(&inst.values, "set", []string{}, "set values on the command line (can repeat or use comma-separated values)")
 	f.StringSliceVar(&inst.stringValues, "set-string", []string{}, "set STRING values on the command line (can repeat or use comma-separated values)")
 	f.BoolVar(&inst.rollback, "rollback", false, "delete service if deployment failed")
+	f.StringVar(&inst.taskDefinitionArn, "task-definition-arn", "", "Use existing task definition instead of reading template file.")
 	f.StringVarP(&inst.service, "name", "n", "", "service name; required for now")
 	cmd.MarkFlagRequired("name")
 
@@ -66,22 +71,6 @@ if you need load balancers; manually create an ECS service outside this tool
 
 func (i *installCmd) run(args []string, svc ecsiface.ECSAPI, config *aws.Config) error {
 	cluster := args[0]
-	taskDefnJSON := args[1]
-	var balances map[string]interface{}
-	balances, err := mergeValues(i.balanceFiles, i.values, i.stringValues)
-	if err != nil {
-		return err
-	}
-	values := map[string]interface{}{
-		"Values": balances,
-	}
-	log.Debugf("Values used for template: %#v", values)
-
-	registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(taskDefnJSON, values, i.strict)
-	if err != nil {
-		return errors.Wrap(err, "cannot parse task definition")
-	}
-	log.Debugf("Task definition: %+v", registerTaskDefinitionInput)
 
 	describeServicesOutput, err := svc.DescribeServices(&ecs.DescribeServicesInput{
 		Cluster:  &cluster,
@@ -103,12 +92,22 @@ func (i *installCmd) run(args []string, svc ecsiface.ECSAPI, config *aws.Config)
 		return fmt.Errorf("Service %#v already exists in cluster %#v. Use czecs upgrade command to upgrade existing service", i.service, cluster)
 	}
 
-	registerTaskDefinitionOutput, err := svc.RegisterTaskDefinition(registerTaskDefinitionInput)
-	if err != nil {
-		return errors.Wrap(err, "cannot register task definition")
+	var taskDefnArn string
+	if len(args) >= 2 {
+		taskDefnArn, err = i.registerTaskDefinition(args[1], svc)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Verify task definition exists
+		_, err := svc.DescribeTaskDefinition(&ecs.DescribeTaskDefinitionInput{
+			TaskDefinition: &i.taskDefinitionArn,
+		})
+		if err != nil {
+			return errors.Wrapf(err, "cannot retrieve task definition %#v", i.taskDefinitionArn)
+		}
+		taskDefnArn = i.taskDefinitionArn
 	}
-	taskDefnArn := *registerTaskDefinitionOutput.TaskDefinition.TaskDefinitionArn
-	log.Infof("Successfully registered task definition %#v", taskDefnArn)
 
 	err = deployInstall(svc, cluster, i.service, taskDefnArn, config)
 	if err != nil && i.rollback {

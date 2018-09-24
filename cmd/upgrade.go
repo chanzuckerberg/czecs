@@ -9,7 +9,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/ecs/ecsiface"
-	"github.com/chanzuckerberg/czecs/tasks"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -23,13 +22,13 @@ type upgradeCmd struct {
 func newUpgradeCmd() *cobra.Command {
 	upgrade := &upgradeCmd{}
 	cmd := &cobra.Command{
-		Use:   "upgrade [cluster] [service] [task_definition.json]",
+		Use:   "upgrade [--task-definition-arn arn] [cluster] [service] [task_definition.json]",
 		Short: "Upgrade an existing service in an ECS cluster",
 		Long: `This command upgrades a service to a new version of a task definition.
 
 The task must already exist.`,
 		SilenceUsage: true,
-		Args:         cobra.ExactArgs(3),
+		Args:         cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			logLevel := log.InfoLevel
 			if debug { // debug overrides quiet
@@ -38,6 +37,10 @@ The task must already exist.`,
 				logLevel = log.FatalLevel
 			}
 			log.SetLevel(logLevel)
+
+			if (len(args) >= 3) == (upgrade.taskDefinitionArn != "") {
+				return fmt.Errorf("exactly one of a task definition JSON filename (czecs.json) or a task definition ARN via --task-definition-arn must be provided")
+			}
 
 			sess := session.Must(session.NewSessionWithOptions(session.Options{
 				SharedConfigState: session.SharedConfigEnable,
@@ -56,6 +59,7 @@ The task must already exist.`,
 	f.StringSliceVar(&upgrade.stringValues, "set-string", []string{}, "set STRING values on the command line (can repeat or use comma-separated values)")
 	f.BoolVar(&upgrade.rollback, "rollback", false, "rollback to previous version if deployment failed")
 	f.BoolVar(&upgrade.deregister, "deregister", false, "remove old task definition on success (or remove new task definition on failure)")
+	f.StringVar(&upgrade.taskDefinitionArn, "task-definition-arn", "", "Use existing task definition instead of reading template file.")
 
 	return cmd
 }
@@ -63,22 +67,6 @@ The task must already exist.`,
 func (u *upgradeCmd) run(args []string, svc ecsiface.ECSAPI, config *aws.Config) error {
 	cluster := args[0]
 	service := args[1]
-	taskDefnJSON := args[2]
-	var balances map[string]interface{}
-	balances, err := mergeValues(u.balanceFiles, u.values, u.stringValues)
-	if err != nil {
-		return err
-	}
-	values := map[string]interface{}{
-		"Values": balances,
-	}
-	log.Debugf("Values used for template: %#v", values)
-
-	registerTaskDefinitionInput, err := tasks.ParseTaskDefinition(taskDefnJSON, values, u.strict)
-	if err != nil {
-		return errors.Wrap(err, "cannot parse task definition")
-	}
-	log.Debugf("Task definition: %+v", registerTaskDefinitionInput)
 
 	describeServicesOutput, err := svc.DescribeServices(&ecs.DescribeServicesInput{
 		Cluster:  &cluster,
@@ -106,12 +94,22 @@ func (u *upgradeCmd) run(args []string, svc ecsiface.ECSAPI, config *aws.Config)
 	}
 	log.Infof("Existing task definition %#v", *oldTaskDefinition)
 
-	registerTaskDefinitionOutput, err := svc.RegisterTaskDefinition(registerTaskDefinitionInput)
-	if err != nil {
-		return errors.Wrap(err, "cannot register task definition")
+	var taskDefnArn string
+	if len(args) >= 3 {
+		taskDefnArn, err = u.registerTaskDefinition(args[2], svc)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Verify task definition exists
+		_, err := svc.DescribeTaskDefinition(&ecs.DescribeTaskDefinitionInput{
+			TaskDefinition: &u.taskDefinitionArn,
+		})
+		if err != nil {
+			return errors.Wrapf(err, "cannot retrieve task definition %#v", u.taskDefinitionArn)
+		}
+		taskDefnArn = u.taskDefinitionArn
 	}
-	taskDefnArn := *registerTaskDefinitionOutput.TaskDefinition.TaskDefinitionArn
-	log.Infof("Successfully registered task definition %#v", taskDefnArn)
 
 	err = deployUpgrade(svc, cluster, service, taskDefnArn, config)
 	if err != nil {
