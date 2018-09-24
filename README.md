@@ -8,7 +8,7 @@ CLI deployment tool for AWS Elastic Container Service
 You can use homebrew to install czecs –
 
 ```
-brew tap chanzuckerberg/homebrew-czecs
+brew tap chanzuckerberg/homebrew-tap
 brew install czecs
 ```
 

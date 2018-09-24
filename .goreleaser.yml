@@ -28,6 +28,6 @@ brew:
   description: "ECS release management tool."
   github:
     owner: chanzuckerberg
-    name: homebrew-czecs
+    name: homebrew-tap
   homepage: "https://github.com/chanzuckerberg/czecs"
   test: system "#{bin}/czecs version"
