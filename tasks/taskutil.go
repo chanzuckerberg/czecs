@@ -49,13 +49,10 @@ func ReadFileOrURI(fileOrURI string) ([]byte, error) {
 	return nil, fmt.Errorf("Unexpected url scheme %v in URI %v", url.Scheme, fileOrURI)
 }
 
-// ParseTaskDefinition parses an ECS task definition from a file, using the given values to fill in template variables.
-// Optionally, in strict mode fail with error if a template variable makes a reference to a value
-// that has not been provided.
-func ParseTaskDefinition(defnFilename string, values map[string]interface{}, strict bool) (*ecs.RegisterTaskDefinitionInput, error) {
+func processTemplate(defnFilename string, values map[string]interface{}, strict bool) (string, error) {
 	rawDefn, err := ReadFileOrURI(defnFilename)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Error reading task definition from %v", defnFilename)
+		return "", errors.Wrapf(err, "Error reading task definition from %v", defnFilename)
 	}
 	templateOption := "missingkey=zero"
 	if strict {
@@ -65,21 +62,41 @@ func ParseTaskDefinition(defnFilename string, values map[string]interface{}, str
 	}
 	tmpl, err := template.New(defnFilename).Option(templateOption).Parse(string(rawDefn))
 	if err != nil {
-		return nil, errors.Wrap(err, "Error parsing task definition template")
+		return "", errors.Wrap(err, "Error parsing task definition template")
 	}
 	var defn bytes.Buffer
 	if tmpl.Execute(&defn, values); err != nil {
-		return nil, errors.Wrap(err, "Error executing task definition template")
+		return "", errors.Wrap(err, "Error executing task definition template")
 	}
 	// missingkey=zero doesn't work completely properly on map[string]interface{}
 	// https://github.com/golang/go/issues/24963
 	// We handle this with the hard coded substitution of the string <no value> string
 	filteredDefn := strings.Replace(defn.String(), "<no value>", "", -1)
+	return filteredDefn, nil
+}
+
+// ParseTaskDefinition parses an ECS task definition from a file, using the given values to fill in template variables.
+// Optionally, in strict mode fail with error if a template variable makes a reference to a value
+// that has not been provided.
+func ParseTaskDefinition(defnFilename string, values map[string]interface{}, strict bool) (*ecs.RegisterTaskDefinitionInput, error) {
+	filteredDefn, err := processTemplate(defnFilename, values, strict)
 	var taskDefn ecs.RegisterTaskDefinitionInput
 	if err = json.Unmarshal([]byte(filteredDefn), &taskDefn); err != nil {
 		return nil, errors.Wrap(err, "Error parsing JSON of task definition")
 	}
 	return &taskDefn, nil
+}
+
+// ParseTask parses an ECS task from a file, using the given values to fill in template variables.
+// Optionally, in strict mode fail with error if a template variable makes a reference to a value
+// that has not been provided.
+func ParseTask(taskFilename string, values map[string]interface{}, strict bool) (*ecs.RunTaskInput, error) {
+	filteredTask, err := processTemplate(taskFilename, values, strict)
+	var runTaskInput ecs.RunTaskInput
+	if err = json.Unmarshal([]byte(filteredTask), &runTaskInput); err != nil {
+		return nil, errors.Wrap(err, "Error parsing JSON of task")
+	}
+	return &runTaskInput, nil
 }
 
 // ParseBalances reads an arbitrary JSON file for use as values to use to replace template variable placeholders.
