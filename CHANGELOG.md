@@ -1,6 +1,6 @@
 # Change log
 
-## 2018-09-?? v0.1.0
+## 2018-09-26 v0.1.0-rc1
 
 * [breaking] Remove template command
 * Add register command, use --dry-run for previous template command functionality
