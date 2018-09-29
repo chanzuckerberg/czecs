@@ -131,11 +131,7 @@ func (i *installCmd) run(args []string, svc ecsiface.ECSAPI, config *aws.Config)
 }
 
 func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefnArn string, config *aws.Config) error {
-	// Intentionally using printf directly, since we want this to be on the same line as the
-	// progress dots.
-	if log.GetLevel() >= log.InfoLevel {
-		fmt.Printf("Creating service %#v in cluster %#v with task definition %#v", service, cluster, taskDefnArn)
-	}
+	log.Infof("Creating service %#v in cluster %#v with task definition %#v", service, cluster, taskDefnArn)
 	log.Infof("Service info location: https://%s.console.aws.amazon.com/ecs/home?region=%s#/clusters/%s/services/%s/details", *config.Region, *config.Region, cluster, service)
 
 	// Get the primary deployment's updated date, default to now if missing
@@ -154,6 +150,12 @@ func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefn
 			createdAt = *deployment.CreatedAt
 			break
 		}
+	}
+
+	// Intentionally using printf directly, since we want this to be on the same line as the
+	// progress dots.
+	if log.GetLevel() >= log.InfoLevel {
+		fmt.Printf("Waiting for service %#v in cluster %#v with task definition %#v to be stable", service, cluster, taskDefnArn)
 	}
 
 	opts := []request.WaiterOption{getFailOnAbortContext(createdAt)}

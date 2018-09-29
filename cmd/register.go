@@ -78,7 +78,7 @@ func (r *registerCmd) registerTaskDefinition(taskDefnJSON string, svc ecsiface.E
 	}
 
 	if r.dryRun {
-		fmt.Printf("%s\n", registerTaskDefinitionInput)
+		fmt.Printf("%#v\n", registerTaskDefinitionInput)
 		return "", nil
 	}
 
@@ -122,7 +122,7 @@ func (r *registerCmd) run(args []string, svc ecsiface.ECSAPI) error {
 		return err
 	}
 	if !r.dryRun {
-		fmt.Printf("%#v", taskDefnArn)
+		fmt.Printf("%s\n", taskDefnArn)
 	}
 	return nil
 }

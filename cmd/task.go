@@ -107,12 +107,7 @@ func (t *taskCmd) run(args []string, svc ecsiface.ECSAPI) error {
 }
 
 func runTask(svc ecsiface.ECSAPI, task *ecs.RunTaskInput, taskDefinition *ecs.TaskDefinition) error {
-	// Intentionally using printf directly, since we want this to be on the same line as the
-	// progress dots.
-	if log.GetLevel() >= log.InfoLevel {
-		fmt.Printf("Running task %#v", *task)
-	}
-
+	log.Infof("Running task %#v", *task)
 	runTaskOutput, err := svc.RunTask(task)
 	if err != nil {
 		return err
@@ -164,6 +159,17 @@ func runTask(svc ecsiface.ECSAPI, task *ecs.RunTaskInput, taskDefinition *ecs.Ta
 	} else if log.GetLevel() == log.DebugLevel {
 		opts = append(opts, debugSleepProgressWithContext)
 	}
+
+	// Intentionally using printf directly, since we want this to be on the same line as the
+	// progress dots.
+	if log.GetLevel() >= log.InfoLevel {
+		taskArnStrings := make([]string, len(taskArns))
+		for i, taskArn := range taskArns {
+			taskArnStrings[i] = *taskArn
+		}
+		fmt.Printf("Waiting for tasks %v to finish", taskArnStrings)
+	}
+
 	// Note: Default is 10 minutes; is this enough?
 	// If not can add WithWaiterMaxAttempts to opts above to adjust
 	err = svc.WaitUntilTasksStoppedWithContext(
@@ -196,6 +202,9 @@ func runTask(svc ecsiface.ECSAPI, task *ecs.RunTaskInput, taskDefinition *ecs.Ta
 			return fmt.Errorf("expected all tasks to be stopped, but task ARN %s was in state %#v", *task.TaskArn, task.LastStatus)
 		}
 		for _, container := range task.Containers {
+			if container.ExitCode == nil {
+				return fmt.Errorf("container %s in task %s has no exit code; task may have failed before container started", *container.Name, *task.TaskArn)
+			}
 			if *container.ExitCode != 0 {
 				return fmt.Errorf("container %s in task %s exited with non-zero exit code %d; see logs for details", *container.Name, *task.TaskArn, *container.ExitCode)
 			}
