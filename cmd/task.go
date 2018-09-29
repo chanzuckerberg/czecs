@@ -96,7 +96,7 @@ func (t *taskCmd) run(args []string, svc ecsiface.ECSAPI) error {
 	}
 
 	describeTaskDefinitionOutput, err := svc.DescribeTaskDefinition(&ecs.DescribeTaskDefinitionInput{
-		TaskDefinition: &t.taskDefinitionArn,
+		TaskDefinition: runTaskInput.TaskDefinition,
 	})
 
 	if err != nil {

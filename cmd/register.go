@@ -78,7 +78,7 @@ func (r *registerCmd) registerTaskDefinition(taskDefnJSON string, svc ecsiface.E
 	}
 
 	if r.dryRun {
-		fmt.Printf("%+v\n", registerTaskDefinitionInput)
+		fmt.Printf("%s\n", registerTaskDefinitionInput)
 		return "", nil
 	}
 
