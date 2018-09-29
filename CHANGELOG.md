@@ -1,5 +1,9 @@
 # Change log
 
+## 2018-09-29 v0.1.0-rc2
+
+* Bugfixes for dry run output, task definition ARN in task
+
 ## 2018-09-26 v0.1.0-rc1
 
 * [breaking] Remove template command
