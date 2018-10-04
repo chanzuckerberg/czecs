@@ -5,10 +5,10 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/ecs/ecsiface"
+	"github.com/chanzuckerberg/czecs/util"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -19,6 +19,7 @@ type installCmd struct {
 	rollback          bool
 	service           string
 	taskDefinitionArn string
+	timeout           int
 }
 
 func newInstallCmd() *cobra.Command {
@@ -64,6 +65,7 @@ if you need load balancers; manually create an ECS service outside this tool
 	f.BoolVar(&inst.rollback, "rollback", false, "delete service if deployment failed")
 	f.StringVar(&inst.taskDefinitionArn, "task-definition-arn", "", "Use existing task definition instead of reading template file.")
 	f.StringVarP(&inst.service, "name", "n", "", "service name; required for now")
+	f.IntVarP(&inst.timeout, "timeout", "t", 600, "Seconds to wait for service to become stable before failing. Set to 0 for unlimited wait.")
 	cmd.MarkFlagRequired("name")
 
 	return cmd
@@ -109,10 +111,10 @@ func (i *installCmd) run(args []string, svc ecsiface.ECSAPI, config *aws.Config)
 		taskDefnArn = i.taskDefinitionArn
 	}
 
-	err = deployInstall(svc, cluster, i.service, taskDefnArn, config)
+	err = i.deployInstall(svc, cluster, taskDefnArn, config)
 	if err != nil && i.rollback {
 		log.Warnf("Rolling back service creation of %#v by deleting it", i.service)
-		rollbackErr := rollbackInstall(svc, cluster, i.service)
+		rollbackErr := i.rollbackInstall(svc, cluster)
 		if rollbackErr != nil {
 			return errors.Wrap(rollbackErr, "cannot rollback install")
 		}
@@ -130,15 +132,15 @@ func (i *installCmd) run(args []string, svc ecsiface.ECSAPI, config *aws.Config)
 	return nil
 }
 
-func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefnArn string, config *aws.Config) error {
-	log.Infof("Creating service %#v in cluster %#v with task definition %#v", service, cluster, taskDefnArn)
-	log.Infof("Service info location: https://%s.console.aws.amazon.com/ecs/home?region=%s#/clusters/%s/services/%s/details", *config.Region, *config.Region, cluster, service)
+func (i *installCmd) deployInstall(svc ecsiface.ECSAPI, cluster string, taskDefnArn string, config *aws.Config) error {
+	log.Infof("Creating service %#v in cluster %#v with task definition %#v", i.service, cluster, taskDefnArn)
+	log.Infof("Service info location: https://%s.console.aws.amazon.com/ecs/home?region=%s#/clusters/%s/services/%s/details", *config.Region, *config.Region, cluster, i.service)
 
 	// Get the primary deployment's updated date, default to now if missing
 	createdAt := time.Now()
 	createServiceOutput, err := svc.CreateService(&ecs.CreateServiceInput{
 		Cluster:        &cluster,
-		ServiceName:    &service,
+		ServiceName:    &i.service,
 		TaskDefinition: &taskDefnArn,
 	})
 	if err != nil {
@@ -155,14 +157,14 @@ func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefn
 	// Intentionally using printf directly, since we want this to be on the same line as the
 	// progress dots.
 	if log.GetLevel() >= log.InfoLevel {
-		fmt.Printf("Waiting for service %#v in cluster %#v with task definition %#v to be stable", service, cluster, taskDefnArn)
+		fmt.Printf("Waiting for service %#v in cluster %#v with task definition %#v to be stable", i.service, cluster, taskDefnArn)
 	}
 
-	opts := []request.WaiterOption{getFailOnAbortContext(createdAt)}
+	opts := append(util.WaiterDelay(i.timeout, 15), util.GetFailOnAbortContext(createdAt))
 	if log.GetLevel() >= log.InfoLevel {
-		opts = append(opts, sleepProgressWithContext)
+		opts = append(opts, util.SleepProgressWithContext)
 	} else if log.GetLevel() == log.DebugLevel {
-		opts = append(opts, debugSleepProgressWithContext)
+		opts = append(opts, util.DebugSleepProgressWithContext)
 	}
 	return svc.WaitUntilServicesStableWithContext(
 		aws.BackgroundContext(),
@@ -172,21 +174,21 @@ func deployInstall(svc ecsiface.ECSAPI, cluster string, service string, taskDefn
 		opts...)
 }
 
-func rollbackInstall(svc ecsiface.ECSAPI, cluster string, service string) error {
+func (i *installCmd) rollbackInstall(svc ecsiface.ECSAPI, cluster string) error {
 	// Get the primary deployment's updated date, default to now if missing
 	deleteServiceOutput, err := svc.DeleteService(&ecs.DeleteServiceInput{
 		Cluster: &cluster,
-		Service: &service,
+		Service: &i.service,
 	})
 	if err != nil {
 		return err
 	}
 
-	opts := []request.WaiterOption{}
+	opts := util.WaiterDelay(i.timeout, 15)
 	if log.GetLevel() == log.InfoLevel {
-		opts = append(opts, sleepProgressWithContext)
+		opts = append(opts, util.SleepProgressWithContext)
 	} else if log.GetLevel() == log.DebugLevel {
-		opts = append(opts, debugSleepProgressWithContext)
+		opts = append(opts, util.DebugSleepProgressWithContext)
 	}
 	return svc.WaitUntilServicesInactiveWithContext(
 		aws.BackgroundContext(),

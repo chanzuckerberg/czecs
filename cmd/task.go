@@ -5,11 +5,11 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/aws/aws-sdk-go/service/ecs/ecsiface"
 	"github.com/chanzuckerberg/czecs/tasks"
+	"github.com/chanzuckerberg/czecs/util"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -19,6 +19,7 @@ type taskCmd struct {
 	registerCmd
 	cluster           string
 	taskDefinitionArn string
+	timeout           int
 }
 
 func newTaskCmd() *cobra.Command {
@@ -59,6 +60,7 @@ If so, ALL tasks must`,
 	f.StringSliceVar(&task.stringValues, "set-string", []string{}, "set STRING values on the command line (can repeat or use comma-separated values)")
 	f.StringVar(&task.cluster, "cluster", "", "Cluster to use, overriding any provided in the task JSON.")
 	f.StringVar(&task.taskDefinitionArn, "task-definition-arn", "", "Task definition ARN to use, overriding any provided in the task JSON.")
+	f.IntVarP(&task.timeout, "timeout", "t", 600, "Seconds to wait for task to complete before failing. Set to 0 for unlimited wait.")
 
 	return cmd
 }
@@ -103,10 +105,10 @@ func (t *taskCmd) run(args []string, svc ecsiface.ECSAPI) error {
 		return errors.Wrapf(err, "error retrieving task definition ARN %#v; may not exist", t.taskDefinitionArn)
 	}
 
-	return runTask(svc, runTaskInput, describeTaskDefinitionOutput.TaskDefinition)
+	return t.runTask(svc, runTaskInput, describeTaskDefinitionOutput.TaskDefinition)
 }
 
-func runTask(svc ecsiface.ECSAPI, task *ecs.RunTaskInput, taskDefinition *ecs.TaskDefinition) error {
+func (t *taskCmd) runTask(svc ecsiface.ECSAPI, task *ecs.RunTaskInput, taskDefinition *ecs.TaskDefinition) error {
 	log.Infof("Running task %#v", *task)
 	runTaskOutput, err := svc.RunTask(task)
 	if err != nil {
@@ -153,11 +155,11 @@ func runTask(svc ecsiface.ECSAPI, task *ecs.RunTaskInput, taskDefinition *ecs.Ta
 		return fmt.Errorf("failed to start all instances of task %s; failures %#v", *task.TaskDefinition, runTaskOutput.Failures)
 	}
 
-	opts := []request.WaiterOption{}
+	opts := util.WaiterDelay(t.timeout, 6)
 	if log.GetLevel() >= log.InfoLevel {
-		opts = append(opts, sleepProgressWithContext)
+		opts = append(opts, util.SleepProgressWithContext)
 	} else if log.GetLevel() == log.DebugLevel {
-		opts = append(opts, debugSleepProgressWithContext)
+		opts = append(opts, util.DebugSleepProgressWithContext)
 	}
 
 	// Intentionally using printf directly, since we want this to be on the same line as the
