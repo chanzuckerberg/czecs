@@ -1,5 +1,9 @@
 # Change log
 
+## 2018-10-04 v0.1.1
+* Stricter parsing of JSON to reject unknown fields
+* Add --timeout to upgrade/install/task for wait time for task completion/service stability
+
 ## 2018-09-29 v0.1.0
 
 * [breaking] Remove template command
