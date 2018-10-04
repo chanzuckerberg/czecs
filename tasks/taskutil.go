@@ -80,8 +80,15 @@ func processTemplate(defnFilename string, values map[string]interface{}, strict 
 // that has not been provided.
 func ParseTaskDefinition(defnFilename string, values map[string]interface{}, strict bool) (*ecs.RegisterTaskDefinitionInput, error) {
 	filteredDefn, err := processTemplate(defnFilename, values, strict)
+	if err != nil {
+		return nil, err
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(filteredDefn))
+	decoder.DisallowUnknownFields()
+
 	var taskDefn ecs.RegisterTaskDefinitionInput
-	if err = json.Unmarshal([]byte(filteredDefn), &taskDefn); err != nil {
+	if err = decoder.Decode(&taskDefn); err != nil {
 		return nil, errors.Wrap(err, "Error parsing JSON of task definition")
 	}
 	return &taskDefn, nil
@@ -92,8 +99,15 @@ func ParseTaskDefinition(defnFilename string, values map[string]interface{}, str
 // that has not been provided.
 func ParseTask(taskFilename string, values map[string]interface{}, strict bool) (*ecs.RunTaskInput, error) {
 	filteredTask, err := processTemplate(taskFilename, values, strict)
+	if err != nil {
+		return nil, err
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(filteredTask))
+	decoder.DisallowUnknownFields()
+
 	var runTaskInput ecs.RunTaskInput
-	if err = json.Unmarshal([]byte(filteredTask), &runTaskInput); err != nil {
+	if err = decoder.Decode(&runTaskInput); err != nil {
 		return nil, errors.Wrap(err, "Error parsing JSON of task")
 	}
 	return &runTaskInput, nil
