@@ -1,5 +1,8 @@
 # Change log
 
+## 2018-12-17 v0.1.2
+* Upgrade dependencies; adds support for ECS cluster/service/task definition tags
+
 ## 2018-10-04 v0.1.1
 * Stricter parsing of JSON to reject unknown fields
 * Add --timeout to upgrade/install/task for wait time for task completion/service stability
