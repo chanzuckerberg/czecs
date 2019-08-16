@@ -1,7 +1,7 @@
 module github.com/chanzuckerberg/czecs
 
 require (
-	github.com/aws/aws-sdk-go v1.16.6
+	github.com/aws/aws-sdk-go v1.23.2
 	github.com/cloudflare/cfssl v0.0.0-20181213083726-b94e044bb51e
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/imdario/mergo v0.3.6
